@@ -1,0 +1,7 @@
+/target/
+/project/target
+/.idea/
+/.bsp/
+/src/main/resources/output/
+/src/main/resources/sample_data/
+/spark-warehouse/
