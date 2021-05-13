@@ -16,12 +16,14 @@ with open("../config.json") as f:
     config = json.load(f)
 
 def create_fake_view():
+    item_id = random.randint(1, config["num_of_items"])
     user_ip = f"{random.randint(11, 191)}.{random.randint(1, 223)}." \
               f"{random.randint(1, 254)}.{random.randint(1, 254)}"
     device_type = random.choice(config["device_types"])
     device_id = random.randint(1, config["num_of_devices"])
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
+            "item_id": str(item_id),
             "user_ip": user_ip,
             "device_type": device_type,
             "device_id": str(device_id),
@@ -54,6 +56,7 @@ def get_reviews():
 REVIEWS = get_reviews()
 
 def create_fake_review():
+    item_id = random.randint(1, config["num_of_items"])
     user_ip = f"{random.randint(11, 191)}.{random.randint(1, 223)}." \
               f"{random.randint(1, 254)}.{random.randint(1, 254)}"
     device_type = random.choice(config["device_types"])
@@ -64,6 +67,7 @@ def create_fake_review():
     review_text = " ".join(review.split()[3:])
     review_stars = random.randint(0, 5)
     return {
+            "item_id": str(item_id),
             "user_ip": user_ip,
             "device_type": device_type,
             "device_id": str(device_id),
