@@ -19,7 +19,7 @@ def get_suspicious_ips(ips, batch_size=90):
         response = dynamodb_client.batch_get_item(
             RequestItems={
                 f"{table}": {
-                    "Keys": [{"user_ip": {"S": user_ip}} for user_ip in ips]
+                    "Keys": [{"user_ip": {"S": user_ip}} for user_ip in batch]
                 }
             }
         )
