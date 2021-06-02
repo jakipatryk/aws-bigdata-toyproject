@@ -1,0 +1,1280 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Builds a stack used for the Amazon Big Data course.'
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: 'Unique name for the S3 bucket used for storing logs (views, reviews), query results, etc.'
+    AllowedPattern: '[a-z0-9.-]+'
+  SuspiciousIpsTableName:
+    Type: String
+    Default: 'suspicious-ips'
+    MinLength: 3
+    MaxLength: 255
+    AllowedPattern: '[a-zA-Z0-9_.-]+'
+  AverageRatingsTableName:
+    Type: String
+    Default: 'average-items-ratings'
+    MinLength: 3
+    MaxLength: 255
+    AllowedPattern: '[a-zA-Z0-9_.-]+'
+  ViewsStreamName:
+    Type: String
+    Default: 'views_logs'
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: '[a-zA-Z0-9_.-]+'
+  ReviewsStreamName:
+    Type: String
+    Default: 'reviews_logs'
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: '[a-zA-Z0-9_.-]+'
+  StaticFilesBucketName:
+    Type: String
+    Description: 'Name of the bucket containing all static files with code for lambdas, jars for Spark, etc.'
+    AllowedPattern: '[a-z0-9.-]+'
+  StaticFilesBucketArn:
+    Type: String
+  SuspiciousIpsDetectionKeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+  SuspiciousIpsDetectionStartDate:
+    Type: String
+    Description: 'Starting day of daily repeating Spark job in format yyyy-mm-dd'
+    AllowedPattern: '\d\d\d\d-\d\d-\d\d'
+  SpamSageMakerEndpointName:
+    Type: String
+    Description: 'Endpoint name serving trained spam detection model.'
+  TooPopularItemsAlertEmail:
+    Type: String
+    Description: 'Email used to send alerts of too popular items to.'
+  RDSMasterUsername:
+    Type: String
+    Description: 'Master username for RDS storing items details copied from S3.'
+  RDSMasterUserPassword:
+    Type: String
+    MinLength: 8
+    MaxLength: 41
+Resources:
+  SuspiciousIpsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Ref: SuspiciousIpsTableName
+      AttributeDefinitions:
+        - AttributeName: 'user_ip'
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: 'user_ip'
+          KeyType: 'HASH'
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: 'expires_on'
+        Enabled: true
+      LocalSecondaryIndexes: []
+      GlobalSecondaryIndexes: []
+  AverageRatingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Ref: AverageRatingsTableName
+      AttributeDefinitions:
+        - AttributeName: 'item_id'
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: 'item_id'
+          KeyType: 'HASH'
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      LocalSecondaryIndexes: []
+      GlobalSecondaryIndexes: []
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn: ProcessingLambdaPermission
+    Properties:
+      BucketName:
+        Ref: S3BucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt S3ToDynamoDBLambda.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: 'prefix'
+                    Value: 'athena_query_results/items_average_ratings/'
+                  - Name: 'suffix'
+                    Value: '.csv'
+  ProcessingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref S3ToDynamoDBLambda
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${S3BucketName}'
+      SourceAccount: !Ref AWS::AccountId
+  S3ToDynamoDBLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'S3ToDynamoDBLambdaRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'S3Read'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 's3:Get*'
+                  - 's3:List*'
+                Resource: '*'
+        - PolicyName: 'AmazonDynamoDBFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'dynamodb:*'
+                Resource: '*'
+        - PolicyName: 'AWSLambdaBasicExecutionRole'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+  S3ToDynamoDBLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket:
+          Ref: StaticFilesBucketName
+        S3Key: 'static/lambdas/s3_to_dynamodb.zip'
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref AverageRatingsTable
+      FunctionName: 's3_to_dynamodb'
+      Handler: 'lambda_function.lambda_handler'
+      PackageType: Zip
+      Role: !GetAtt S3ToDynamoDBLambdaRole.Arn
+      Runtime: 'python3.8'
+      Timeout: 120
+  ViewsStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name:
+        Ref: ViewsStreamName
+      ShardCount: 1
+  ReviewsStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name:
+        Ref: ReviewsStreamName
+      ShardCount: 1
+  SuspiciousIpsDetectionResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'SuspiciousIpsDetectionResourceRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'AmazonEC2RoleforDataPipelineRole'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'cloudwatch:*'
+                  - 'datapipeline:*'
+                  - 'dynamodb:*'
+                  - 'ec2:Describe*'
+                  - 'elasticmapreduce:AddJobFlowSteps'
+                  - 'elasticmapreduce:Describe*'
+                  - 'elasticmapreduce:ListInstance*'
+                  - 'elasticmapreduce:ModifyInstanceGroups'
+                  - 'rds:Describe*'
+                  - 'redshift:DescribeClusters'
+                  - 'redshift:DescribeClusterSecurityGroups'
+                  - 's3:*'
+                  - 'sdb:*'
+                  - 'sns:*'
+                  - 'sqs:*'
+                Resource: '*'
+  SuspiciousIpsDetectionResourceInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Ref: SuspiciousIpsDetectionResourceRole
+      Roles:
+        - Ref: SuspiciousIpsDetectionResourceRole
+  SuspiciousIpsDetectionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'SuspiciousIpsDetectionRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'datapipeline.amazonaws.com'
+                - 'elasticmapreduce.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'AWSDataPipelineRole'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'cloudwatch:*'
+                  - 'datapipeline:DescribeObjects'
+                  - 'datapipeline:EvaluateExpression'
+                  - 'dynamodb:BatchGetItem'
+                  - 'dynamodb:DescribeTable'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:UpdateTable'
+                  - 'rds:DescribeDBInstances'
+                  - 'rds:DescribeDBSecurityGroups'
+                  - 'redshift:DescribeClusters'
+                  - 'redshift:DescribeClusterSecurityGroups'
+                  - 'ec2:AuthorizeSecurityGroupIngress'
+                  - 'ec2:CancelSpotInstanceRequests'
+                  - 'ec2:CreateSecurityGroup'
+                  - 'ec2:CreateTags'
+                  - 'ec2:DeleteTags'
+                  - 'ec2:Describe*'
+                  - 'ec2:ModifyImageAttribute'
+                  - 'ec2:ModifyInstanceAttribute'
+                  - 'ec2:RequestSpotInstances'
+                  - 'ec2:RunInstances'
+                  - 'ec2:StartInstances'
+                  - 'ec2:StopInstances'
+                  - 'ec2:TerminateInstances'
+                  - 'ec2:AuthorizeSecurityGroupEgress'
+                  - 'ec2:DeleteSecurityGroup'
+                  - 'ec2:RevokeSecurityGroupEgress'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:DeleteNetworkInterface'
+                  - 'ec2:DetachNetworkInterface'
+                  - 'elasticmapreduce:*'
+                  - 'iam:GetInstanceProfile'
+                  - 'iam:GetRole'
+                  - 'iam:GetRolePolicy'
+                  - 'iam:ListAttachedRolePolicies'
+                  - 'iam:ListRolePolicies'
+                  - 'iam:ListInstanceProfiles'
+                  - 'iam:PassRole'
+                  - 's3:CreateBucket'
+                  - 's3:DeleteObject'
+                  - 's3:Get*'
+                  - 's3:List*'
+                  - 's3:Put*'
+                  - 'sdb:BatchPutAttributes'
+                  - 'sdb:Select*'
+                  - 'sns:GetTopicAttributes'
+                  - 'sns:ListTopics'
+                  - 'sns:Publish'
+                  - 'sns:Subscribe'
+                  - 'sns:Unsubscribe'
+                Resource: '*'
+              - Effect: 'Allow'
+                Action: 'iam:CreateServiceLinkedRole'
+                Resource: '*'
+                Condition:
+                  StringLike:
+                    iam:AWSServiceName:
+                      - 'elasticmapreduce.amazonaws.com'
+                      - 'spot.amazonaws.com'
+  SuspiciousIpsDetectionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Ref: SuspiciousIpsDetectionRole
+      Roles:
+        - Ref: SuspiciousIpsDetectionRole
+  SuspiciousIpsDetectionSpark:
+    Type: AWS::DataPipeline::Pipeline
+    DependsOn: SuspiciousIpsDetectionResourceInstanceProfile
+    Properties:
+      Name: FindingSuspiciousIpsPipeline
+      Activate: true
+      ParameterObjects: []
+      PipelineObjects:
+        - Id: 'EmrActivityObj'
+          Name: 'EmrActivityObj'
+          Fields:
+            - Key: 'type'
+              StringValue: 'EmrActivity'
+            - Key: 'step'
+              StringValue: !Join
+                - ''
+                - - 'command-runner.jar,spark-submit,--deploy-mode,cluster,--class,Driver,--jars,s3://'
+                  - !Ref StaticFilesBucketName
+                  - "/static/jars/config-1.4.1.jar\\\\\\,s3://"
+                  - !Ref StaticFilesBucketName
+                  - "/static/jars/spark-dynamodb_2.11-0.4.4.jar\\\\\\,s3://"
+                  - !Ref StaticFilesBucketName
+                  - '/static/jars/spark-yarn_2.11-2.3.3.jar,--master,yarn,s3://'
+                  - !Ref StaticFilesBucketName
+                  - '/static/jars/suspicious-ips-finder_2.11-0.1.jar,prod'
+            - Key: 'runsOn'
+              RefValue: 'EmrClusterObj'
+        - Id: 'EmrClusterObj'
+          Name: 'EmrClusterObj'
+          Fields:
+            - Key: 'coreInstanceCount'
+              StringValue: '2'
+            - Key: 'masterInstanceType'
+              StringValue: 'm5.xlarge'
+            - Key: 'releaseLabel'
+              StringValue: 'emr-5.22.0'
+            - Key: 'type'
+              StringValue: 'EmrCluster'
+            - Key: 'terminateAfter'
+              StringValue: '50 Minutes'
+            - Key: 'coreInstanceType'
+              StringValue: 'm5.xlarge'
+            - Key: 'keyPair'
+              StringValue:
+                Ref: SuspiciousIpsDetectionKeyPair
+            - Key: 'applications'
+              StringValue: 'spark'
+        - Id: 'DefaultSchedule'
+          Name: 'Every 1 day'
+          Fields:
+            - Key: 'period'
+              StringValue: '1 days'
+            - Key: 'type'
+              StringValue: 'Schedule'
+            - Key: 'startDateTime'
+              StringValue: !Join
+                - ''
+                - - !Ref SuspiciousIpsDetectionStartDate
+                  - 'T23:00:00'
+        - Id: 'Default'
+          Name: 'Default'
+          Fields:
+            - Key: 'type'
+              StringValue: 'Default'
+            - Key: 'failureAndRerunMode'
+              StringValue: 'CASCADE'
+            - Key: 'schedule'
+              RefValue: 'DefaultSchedule'
+            - Key: 'resourceRole'
+              StringValue:
+                Ref: SuspiciousIpsDetectionResourceRole
+            - Key: 'role'
+              StringValue:
+                Ref: SuspiciousIpsDetectionRole
+            - Key: 'scheduleType'
+              StringValue: 'cron'
+  IpFilterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'IpFilterRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'AmazonKinesisFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'kinesis:*'
+                Resource: '*'
+        - PolicyName: 'AmazonDynamoDBReadOnlyAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'application-autoscaling:DescribeScalableTargets'
+                  - 'application-autoscaling:DescribeScalingActivities'
+                  - 'application-autoscaling:DescribeScalingPolicies'
+                  - 'cloudwatch:DescribeAlarmHistory'
+                  - 'cloudwatch:DescribeAlarms'
+                  - 'cloudwatch:DescribeAlarmsForMetric'
+                  - 'cloudwatch:GetMetricStatistics'
+                  - 'cloudwatch:ListMetrics'
+                  - 'cloudwatch:GetMetricData'
+                  - 'datapipeline:DescribeObjects'
+                  - 'datapipeline:DescribePipelines'
+                  - 'datapipeline:GetPipelineDefinition'
+                  - 'datapipeline:ListPipelines'
+                  - 'datapipeline:QueryObjects'
+                  - 'dynamodb:BatchGetItem'
+                  - 'dynamodb:Describe*'
+                  - 'dynamodb:List*'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:PartiQLSelect'
+                  - 'dax:Describe*'
+                  - 'dax:List*'
+                  - 'dax:GetItem'
+                  - 'dax:BatchGetItem'
+                  - 'dax:Query'
+                  - 'dax:Scan'
+                  - 'ec2:DescribeVpcs'
+                  - 'ec2:DescribeSubnets'
+                  - 'ec2:DescribeSecurityGroups'
+                  - 'iam:GetRole'
+                  - 'iam:ListRoles'
+                  - 'kms:DescribeKey'
+                  - 'kms:ListAliases'
+                  - 'sns:ListSubscriptionsByTopic'
+                  - 'sns:ListTopics'
+                  - 'lambda:ListFunctions'
+                  - 'lambda:ListEventSourceMappings'
+                  - 'lambda:GetFunctionConfiguration'
+                  - 'resource-groups:ListGroups'
+                  - 'resource-groups:ListGroupResources'
+                  - 'resource-groups:GetGroup'
+                  - 'resource-groups:GetGroupQuery'
+                  - 'tag:GetResources'
+                  - 'kinesis:ListStreams'
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:DescribeStreamSummary'
+                Resource: '*'
+              - Action: 'cloudwatch:GetInsightRuleReport'
+                Effect: 'Allow'
+                Resource: 'arn:aws:cloudwatch:*:*:insight-rule/DynamoDBContributorInsights*'
+        - PolicyName: 'AmazonKinesisFirehoseFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'firehose:*'
+                Resource: '*'
+  IpFilterLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket:
+          Ref: StaticFilesBucketName
+        S3Key: 'static/lambdas/ip_filter.zip'
+      Environment:
+        Variables:
+          DYNAMO_REGION: !Ref AWS::Region
+          TABLE_NAME: !Ref SuspiciousIpsTable
+      FunctionName: 'ip_filter'
+      Handler: 'lambda.lambda_handler'
+      PackageType: Zip
+      Role: !GetAtt IpFilterRole.Arn
+      Runtime: 'python3.8'
+      Timeout: 120
+  SpamFilterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'SpamFilterRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'AmazonKinesisFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'kinesis:*'
+                Resource: '*'
+        - PolicyName: 'AmazonKinesisFirehoseFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'firehose:*'
+                Resource: '*'
+        - PolicyName: 'AWSLambdaRole'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'lambda:InvokeFunction'
+                Resource: '*'
+        - PolicyName: 'SagemakerInvokeEndpoint'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'sagemaker:InvokeEndpoint'
+                Resource: '*'
+  SpamFilterLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket:
+          Ref: StaticFilesBucketName
+        S3Key: 'static/lambdas/spam_filter.zip'
+      Environment:
+        Variables:
+          IP_FILTER_ARN: !GetAtt IpFilterLambda.Arn
+          SAGEMAKER_ENDPOINT_NAME: !Ref SpamSageMakerEndpointName
+      FunctionName: 'spam_filter'
+      Handler: 'lambda_function.lambda_handler'
+      PackageType: Zip
+      Role: !GetAtt SpamFilterRole.Arn
+      Runtime: 'python3.8'
+      Timeout: 120
+  DeliveryStreamToS3WithLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'DeliveryStreamToS3WithLambdaRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'firehose.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'AmazonKinesisFirehoseLambdaS3Access'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'lambda:InvokeFunction'
+                  - 'lambda:GetFunctionConfiguration'
+                  - 'logs:PutLogEvents'
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:GetShardIterator'
+                  - 'kinesis:GetRecords'
+                  - 'kinesis:ListShards'
+                  - 's3:AbortMultipartUpload'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                  - 's3:ListBucketMultipartUploads'
+                  - 's3:PutObject'
+                Resource: '*'
+  ViewsDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: 'views_to_s3'
+      DeliveryStreamType: 'KinesisStreamAsSource'
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt ViewsStream.Arn
+        RoleARN: !GetAtt DeliveryStreamToS3WithLambdaRole.Arn
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt S3Bucket.Arn
+        Prefix: 'views/'
+        ProcessingConfiguration:
+          Enabled: true
+          Processors:
+            - Type: 'Lambda'
+              Parameters:
+                - ParameterName: 'LambdaArn'
+                  ParameterValue: !GetAtt IpFilterLambda.Arn
+        RoleARN: !GetAtt DeliveryStreamToS3WithLambdaRole.Arn
+  ReviewsDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: 'reviews_to_s3'
+      DeliveryStreamType: 'KinesisStreamAsSource'
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt ReviewsStream.Arn
+        RoleARN: !GetAtt DeliveryStreamToS3WithLambdaRole.Arn
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt S3Bucket.Arn
+        Prefix: 'reviews/'
+        ProcessingConfiguration:
+          Enabled: true
+          Processors:
+            - Type: 'Lambda'
+              Parameters:
+                - ParameterName: 'LambdaArn'
+                  ParameterValue: !GetAtt SpamFilterLambda.Arn
+        RoleARN: !GetAtt DeliveryStreamToS3WithLambdaRole.Arn
+  KinesisAnalyticsLambdaAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'KinesisAnalyticsLambdaAccessRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'kinesisanalytics.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'KinesisAnalyticsLambdaAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'lambda:InvokeFunction'
+                  - 'lambda:GetFunctionConfiguration'
+                  - 'logs:PutLogEvents'
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:GetShardIterator'
+                  - 'kinesis:GetRecords'
+                  - 'kinesis:ListShards'
+                Resource: '*'
+  KinesisAnalyticsKinesisStreamAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'KinesisAnalyticsKinesisStreamAccessRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'kinesisanalytics.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'KinesisAnalyticsKinesisAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:PutLogEvents'
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:GetShardIterator'
+                  - 'kinesis:GetRecords'
+                  - 'kinesis:ListShards'
+                Resource: '*'
+  ViewsStreamAnalytics:
+    Type: AWS::KinesisAnalytics::Application
+    Properties:
+      ApplicationCode: |
+        CREATE OR REPLACE STREAM "MOST_POPULAR_ITEMS_STREAM" (
+            item_id VARCHAR(16),
+            views_count INTEGER
+        );
+        CREATE OR REPLACE STREAM "MOST_POPULAR_CATEGORIES_STREAM" (
+            category VARCHAR(16),
+            views_count INTEGER
+        );
+        CREATE OR REPLACE STREAM "TOO_POPULAR_ITEMS_ALERTS_STREAM" (
+            top_10_views_count INTEGER
+        );
+        CREATE OR REPLACE PUMP "MOST_POPULAR_ITEMS_PUMP" AS
+            INSERT INTO "MOST_POPULAR_ITEMS_STREAM"
+            SELECT STREAM * 
+                FROM TABLE (TOP_K_ITEMS_TUMBLING(
+                    CURSOR(SELECT STREAM * FROM "SOURCE_SQL_STREAM_001"),
+                    'item_id',
+                    10,
+                    60
+                    )
+                );
+        CREATE OR REPLACE PUMP "MOST_POPULAR_CATEGORIES_PUMP" AS
+            INSERT INTO "MOST_POPULAR_CATEGORIES_STREAM"
+            SELECT STREAM *
+                FROM TABLE (TOP_K_ITEMS_TUMBLING(
+                    CURSOR(SELECT STREAM * FROM "SOURCE_SQL_STREAM_001" INNER JOIN "ITEMS" as "I" ON "I"."item_id" = "SOURCE_SQL_STREAM_001"."item_id"),
+                    'item_id',
+                    10,
+                    60
+                    )
+                );
+        CREATE OR REPLACE PUMP "TOO_POPULAR_ITEMS_ALERTS_PUMP" AS
+            INSERT INTO "TOO_POPULAR_ITEMS_ALERTS_STREAM"
+            SELECT STREAM SUM(views_count) AS top_10_views_count 
+                FROM "MOST_POPULAR_ITEMS_STREAM"
+                GROUP BY ROWTIME
+                HAVING SUM(views_count) > 1000;
+      ApplicationName: 'ViewsStreamAnalytics'
+      Inputs:
+        - InputSchema:
+            RecordColumns:
+              - Mapping: 'item_id'
+                Name: 'item_id'
+                SqlType: 'VARCHAR(16)'
+              - Mapping: 'user_ip'
+                Name: 'user_ip'
+                SqlType: 'VARCHAR(16)'
+              - Mapping: 'device_type'
+                Name: 'device_type'
+                SqlType: 'VARCHAR(16)'
+              - Mapping: 'device_id'
+                Name: 'device_id'
+                SqlType: 'VARCHAR(16)'
+              - Mapping: 'timestamp'
+                Name: 'COL_timestamp'
+                SqlType: 'TIMESTAMP'
+            RecordFormat:
+              RecordFormatType: 'JSON'
+          InputProcessingConfiguration:
+            InputLambdaProcessor:
+              ResourceARN: !GetAtt IpFilterLambda.Arn
+              RoleARN: !GetAtt KinesisAnalyticsLambdaAccessRole.Arn
+          KinesisStreamsInput:
+            ResourceARN: !GetAtt ViewsStream.Arn
+            RoleARN: !GetAtt KinesisAnalyticsKinesisStreamAccessRole.Arn
+          NamePrefix: 'SOURCE_SQL_STREAM'
+  KinesisAnalyticsS3AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'KinesisAnalyticsS3AccessRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'kinesisanalytics.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'KinesisAnalyticsS3AccessRole'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:PutLogEvents'
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:GetShardIterator'
+                  - 'kinesis:GetRecords'
+                  - 'kinesis:ListShards'
+                  - 's3:*'
+                Resource: '*'
+  ViewsStreamAnalyticsItemsReference:
+    Type: AWS::KinesisAnalytics::ApplicationReferenceDataSource
+    Properties:
+      ApplicationName: !Ref ViewsStreamAnalytics
+      ReferenceDataSource:
+        ReferenceSchema:
+          RecordColumns:
+            - Mapping: 'item_id'
+              Name: 'item_id'
+              SqlType: 'VARCHAR(16)'
+            - Mapping: 'title'
+              Name: 'title'
+              SqlType: 'VARCHAR(16)'
+            - Mapping: 'description'
+              Name: 'description'
+              SqlType: 'VARCHAR(64)'
+            - Mapping: 'category'
+              Name: 'category'
+              SqlType: 'VARCHAR(16)'
+          RecordFormat:
+            RecordFormatType: 'CSV'
+            MappingParameters:
+              CSVMappingParameters:
+                RecordColumnDelimiter: ','
+                RecordRowDelimiter: "\n"
+        S3ReferenceDataSource:
+          BucketARN: !Ref StaticFilesBucketArn
+          FileKey: 'static/items_description.csv'
+          ReferenceRoleARN: !GetAtt KinesisAnalyticsS3AccessRole.Arn
+        TableName: 'ITEMS'
+  MostPopularItemsDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: 'most_popular_items_to_s3'
+      DeliveryStreamType: 'DirectPut'
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt S3Bucket.Arn
+        Prefix: 'most_popular_items/'
+        RoleARN: !GetAtt DeliveryStreamToS3WithLambdaRole.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+  MostPopularCategoriesDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: 'most_popular_categories_to_s3'
+      DeliveryStreamType: 'DirectPut'
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt S3Bucket.Arn
+        Prefix: 'most_popular_categories/'
+        RoleARN: !GetAtt DeliveryStreamToS3WithLambdaRole.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+  KinesisAnalyticsKinesisFirehoseAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'KinesisAnalyticsKinesisFirehoseAccessRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'kinesisanalytics.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'KinesisAnalyticsKinesisFirehoseAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:PutLogEvents'
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:GetShardIterator'
+                  - 'kinesis:GetRecords'
+                  - 'kinesis:ListShards'
+                  - 'firehose:PutRecord'
+                  - 'firehose:PutRecordBatch'
+                Resource: '*'
+  MostPopularItemsKinesisFirehoseOutput:
+    Type: AWS::KinesisAnalytics::ApplicationOutput
+    Properties:
+      ApplicationName: !Ref ViewsStreamAnalytics
+      Output:
+        Name: 'MOST_POPULAR_ITEMS_STREAM'
+        DestinationSchema:
+          RecordFormatType: 'JSON'
+        KinesisFirehoseOutput:
+          ResourceARN: !GetAtt MostPopularItemsDeliveryStream.Arn
+          RoleARN: !GetAtt KinesisAnalyticsKinesisFirehoseAccessRole.Arn
+  MostPopularCategoriesKinesisFirehoseOutput:
+    Type: AWS::KinesisAnalytics::ApplicationOutput
+    Properties:
+      ApplicationName: !Ref ViewsStreamAnalytics
+      Output:
+        Name: 'MOST_POPULAR_CATEGORIES_STREAM'
+        DestinationSchema:
+          RecordFormatType: 'JSON'
+        KinesisFirehoseOutput:
+          ResourceARN: !GetAtt MostPopularCategoriesDeliveryStream.Arn
+          RoleARN: !GetAtt KinesisAnalyticsKinesisFirehoseAccessRole.Arn
+  TooPopularItemsSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: 'email'
+          Endpoint: !Ref TooPopularItemsAlertEmail
+      TopicName: 'too-popular-items-alert'
+  PublishToSNSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'PublishToSNSRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'PublishToSNS'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:PutLogEvents'
+                  - 'sns:Publish'
+                Resource: '*'
+  PublishToSNSLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket:
+          Ref: StaticFilesBucketName
+        S3Key: 'static/lambdas/publish_to_sns.zip'
+      Environment:
+        Variables:
+          SNS_ARN: !Ref TooPopularItemsSNSTopic
+      FunctionName: 'publish_to_sns_on_too_popular_items_alert'
+      Handler: 'lambda_handler.lambda_handler'
+      PackageType: Zip
+      Role: !GetAtt PublishToSNSRole.Arn
+      Runtime: 'python3.8'
+      Timeout: 120
+  TooPopularItemsAlertLambdaOutput:
+    Type: AWS::KinesisAnalytics::ApplicationOutput
+    Properties:
+      ApplicationName: !Ref ViewsStreamAnalytics
+      Output:
+        Name: 'TOO_POPULAR_ITEMS_ALERTS_STREAM'
+        DestinationSchema:
+          RecordFormatType: 'JSON'
+        LambdaOutput:
+          ResourceARN: !GetAtt PublishToSNSLambda.Arn
+          RoleARN: !GetAtt KinesisAnalyticsLambdaAccessRole.Arn
+  BigDataCourseGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: 'big-data-course-glue-database'
+  ViewsGlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref BigDataCourseGlueDatabase
+      TableInput:
+        Name: 'views-table'
+        PartitionKeys: []
+        TableType: 'EXTERNAL_TABLE'
+        StorageDescriptor:
+          Columns:
+            - Type: 'string'
+              Name: 'item_id'
+            - Type: 'string'
+              Name: 'user_ip'
+            - Type: 'string'
+              Name: 'device_type'
+            - Type: 'string'
+              Name: 'device_id'
+            - Type: 'timestamp'
+              Name: 'timestamp'
+          Compressed: False
+          InputFormat: 'org.apache.hadoop.mapred.TextInputFormat'
+          Location: !Join
+            - ''
+            - - 's3://'
+              - !Ref S3Bucket
+              - '/views/'
+          SerdeInfo:
+            SerializationLibrary: 'org.openx.data.jsonserde.JsonSerDe'
+            Parameters:
+              paths: 'device_id,device_type,timestamp,user_ip'
+          OutputFormat: 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+  ViewsDistributionAthenaQuery:
+    Type: AWS::Athena::NamedQuery
+    Properties:
+      Database: !Ref BigDataCourseGlueDatabase
+      Name: 'views-distribution'
+      QueryString: !Join
+        - ''
+        - - 'SELECT device_type, (COUNT(*) * 100.0 / (SELECT COUNT(*) FROM "'
+          - !Ref ViewsGlueTable
+          - '")) AS distribution_percentage FROM "'
+          - !Ref ViewsGlueTable
+          - '" GROUP BY device_type'
+  ReviewsGlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref BigDataCourseGlueDatabase
+      TableInput:
+        Name: 'reviews-table'
+        PartitionKeys: []
+        TableType: 'EXTERNAL_TABLE'
+        StorageDescriptor:
+          Columns:
+            - Type: 'string'
+              Name: 'item_id'
+            - Type: 'string'
+              Name: 'user_ip'
+            - Type: 'string'
+              Name: 'device_type'
+            - Type: 'string'
+              Name: 'device_id'
+            - Type: 'timestamp'
+              Name: 'timestamp'
+            - Type: 'string'
+              Name: 'review_title'
+            - Type: 'string'
+              Name: 'review_text'
+            - Type: 'int'
+              Name: 'review_stars'
+          Compressed: False
+          InputFormat: 'org.apache.hadoop.mapred.TextInputFormat'
+          Location: !Join
+            - ''
+            - - 's3://'
+              - !Ref S3Bucket
+              - '/reviews/'
+          SerdeInfo:
+            SerializationLibrary: 'org.openx.data.jsonserde.JsonSerDe'
+            Parameters:
+              paths: 'device_id,device_type,item_id,review_stars,review_text,review_title,timestamp,user_ip'
+          OutputFormat: 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+  AverageRatingsAthenaQuery:
+    Type: AWS::Athena::NamedQuery
+    Properties:
+      Database: !Ref BigDataCourseGlueDatabase
+      Name: 'items_average_ratings'
+      QueryString: !Join
+        - ''
+        - - 'SELECT item_id, AVG(review_stars) AS average_rating FROM "'
+          - !Ref ReviewsGlueTable
+          - '" GROUP BY item_id'
+  RDSMySQLInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: 20
+      DBInstanceClass: 'db.t3.micro'
+      DBName: 'items'
+      DBInstanceIdentifier: 'itemsdbid'
+      Engine: 'mysql'
+      MasterUsername: !Ref RDSMasterUsername
+      MasterUserPassword: !Ref RDSMasterUserPassword
+  S3ToRDSMySQLDataPipeline:
+    Type: AWS::DataPipeline::Pipeline
+    DependsOn: RDSMySQLInstance
+    Properties:
+      Name: 'S3ToRDSMySQLDataPipeline'
+      Activate: true
+      ParameterObjects:
+        - Id: '*myRDSPassword'
+          Attributes:
+            - Key: 'description'
+              StringValue: 'RDS MySQL password'
+            - Key: 'type'
+              StringValue: 'String'
+      ParameterValues:
+        - Id: '*myRDSPassword'
+          StringValue: !Ref RDSMasterUserPassword
+      PipelineObjects:
+        - Id: 'DataLoadActivity'
+          Name: 'DataLoadActivity'
+          Fields:
+            - Key: 'type'
+              StringValue: 'CopyActivity'
+            - Key: 'output'
+              RefValue: 'DestinationRDSTable'
+            - Key: 'input'
+              RefValue: 'S3InputDataLocation'
+            - Key: 'dependsOn'
+              RefValue: 'RdsMySqlTableCreateActivity'
+            - Key: 'runsOn'
+              RefValue: 'Ec2Instance'
+        - Id: 'Default'
+          Name: 'Default'
+          Fields:
+            - Key: 'type'
+              StringValue: 'Default'
+            - Key: 'failureAndRerunMode'
+              StringValue: 'CASCADE'
+            - Key: 'resourceRole'
+              StringValue:
+                Ref: S3ToRDSMySQLResourceRole
+            - Key: 'role'
+              StringValue:
+                Ref: S3ToRDSMySQLRole
+            - Key: 'scheduleType'
+              StringValue: 'ONDEMAND'
+        - Id: 'rds_mysql'
+          Name: 'rds_mysql'
+          Fields:
+            - Key: 'type'
+              StringValue: 'RdsDatabase'
+            - Key: 'databaseName'
+              StringValue: 'items'
+            - Key: '*password'
+              StringValue: '#{*myRDSPassword}'
+            - Key: 'jdbcProperties'
+              StringValue: 'allowMultiQueries=true'
+            - Key: 'jdbcDriverJarUri'
+              StringValue: !Join
+                - ''
+                - - 's3://'
+                  - !Ref StaticFilesBucketName
+                  - '/static/jars/mysql-connector-java-5.1.48-bin.jar'
+            - Key: 'rdsInstanceId'
+              StringValue: 'itemsdbid'
+            - Key: 'username'
+              StringValue: !Ref RDSMasterUsername
+        - Id: 'RdsMySqlTableCreateActivity'
+          Name: 'RdsMySqlTableCreateActivity'
+          Fields:
+            - Key: 'type'
+              StringValue: 'SqlActivity'
+            - Key: 'database'
+              RefValue: 'rds_mysql'
+            - Key: 'runsOn'
+              RefValue: 'Ec2Instance'
+            - Key: 'script'
+              StringValue: 'CREATE TABLE IF NOT EXISTS item_details (item_id VARCHAR(16), title VARCHAR(16), description VARCHAR(64), category VARCHAR(16));'
+        - Id: 'Ec2Instance'
+          Name: 'Ec2Instance'
+          Fields:
+            - Key: 'type'
+              StringValue: 'Ec2Resource'
+            - Key: 'instanceType'
+              StringValue: 't1.micro'
+            - Key: 'actionOnTaskFailure'
+              StringValue: 'terminate'
+            - Key: 'terminateAfter'
+              StringValue: '2 Hours'
+        - Id: 'DataFormat1'
+          Name: 'DataFormat1'
+          Fields:
+            - Key: 'type'
+              StringValue: 'CSV'
+        - Id: 'DestinationRDSTable'
+          Name: 'DestinationRDSTable'
+          Fields:
+            - Key: 'type'
+              StringValue: 'SqlDataNode'
+            - Key: 'database'
+              RefValue: 'rds_mysql'
+            - Key: 'insertQuery'
+              StringValue: 'INSERT INTO #{table} (item_id, title, description, category) VALUES(?, ?, ?, ?);'
+            - Key: 'table'
+              StringValue: 'item_details'
+            - Key: 'selectQuery'
+              StringValue: 'select * from #{table}'
+        - Id: 'S3InputDataLocation'
+          Name: 'S3InputDataLocation'
+          Fields:
+            - Key: 'type'
+              StringValue: 'S3DataNode'
+            - Key: 'directoryPath'
+              StringValue: !Join
+                - ''
+                - - 's3://'
+                  - !Ref StaticFilesBucketName
+                  - '/static/items_description.csv'
+            - Key: 'dataFormat'
+              RefValue: 'DataFormat1'
+  S3ToRDSMySQLResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'S3ToRDSMySQLResourceRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'AmazonEC2RoleforDataPipelineRole'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'cloudwatch:*'
+                  - 'datapipeline:*'
+                  - 'dynamodb:*'
+                  - 'ec2:Describe*'
+                  - 'elasticmapreduce:AddJobFlowSteps'
+                  - 'elasticmapreduce:Describe*'
+                  - 'elasticmapreduce:ListInstance*'
+                  - 'elasticmapreduce:ModifyInstanceGroups'
+                  - 'rds:*'
+                  - 'redshift:DescribeClusters'
+                  - 'redshift:DescribeClusterSecurityGroups'
+                  - 's3:*'
+                  - 'sdb:*'
+                  - 'sns:*'
+                  - 'sqs:*'
+                Resource: '*'
+  S3ToRDSMySQLResourceInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Ref: S3ToRDSMySQLResourceRole
+      Roles:
+        - Ref: S3ToRDSMySQLResourceRole
+  S3ToRDSMySQLRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'S3ToRDSMySQLRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'datapipeline.amazonaws.com'
+                - 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'AWSDataPipelineRole'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'cloudwatch:*'
+                  - 'datapipeline:DescribeObjects'
+                  - 'datapipeline:EvaluateExpression'
+                  - 'dynamodb:BatchGetItem'
+                  - 'dynamodb:DescribeTable'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:UpdateTable'
+                  - 'rds:DescribeDBInstances'
+                  - 'rds:DescribeDBSecurityGroups'
+                  - 'redshift:DescribeClusters'
+                  - 'redshift:DescribeClusterSecurityGroups'
+                  - 'ec2:AuthorizeSecurityGroupIngress'
+                  - 'ec2:CancelSpotInstanceRequests'
+                  - 'ec2:CreateSecurityGroup'
+                  - 'ec2:CreateTags'
+                  - 'ec2:DeleteTags'
+                  - 'ec2:Describe*'
+                  - 'ec2:ModifyImageAttribute'
+                  - 'ec2:ModifyInstanceAttribute'
+                  - 'ec2:RequestSpotInstances'
+                  - 'ec2:RunInstances'
+                  - 'ec2:StartInstances'
+                  - 'ec2:StopInstances'
+                  - 'ec2:TerminateInstances'
+                  - 'ec2:AuthorizeSecurityGroupEgress'
+                  - 'ec2:DeleteSecurityGroup'
+                  - 'ec2:RevokeSecurityGroupEgress'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:DeleteNetworkInterface'
+                  - 'ec2:DetachNetworkInterface'
+                  - 'elasticmapreduce:*'
+                  - 'iam:GetInstanceProfile'
+                  - 'iam:GetRole'
+                  - 'iam:GetRolePolicy'
+                  - 'iam:ListAttachedRolePolicies'
+                  - 'iam:ListRolePolicies'
+                  - 'iam:ListInstanceProfiles'
+                  - 'iam:PassRole'
+                  - 's3:CreateBucket'
+                  - 's3:DeleteObject'
+                  - 's3:Get*'
+                  - 's3:List*'
+                  - 's3:Put*'
+                  - 'sdb:BatchPutAttributes'
+                  - 'sdb:Select*'
+                  - 'sns:GetTopicAttributes'
+                  - 'sns:ListTopics'
+                  - 'sns:Publish'
+                  - 'sns:Subscribe'
+                  - 'sns:Unsubscribe'
+                Resource: '*'
+  S3ToRDSMySQLInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Ref: S3ToRDSMySQLRole
+      Roles:
+        - Ref: S3ToRDSMySQLRole
