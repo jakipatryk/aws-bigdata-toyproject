@@ -1,0 +1,10 @@
+{
+    "region": "us-east-1",
+    "num_of_items": 10000,
+    "num_of_categories": 13,
+    "num_of_devices": 1000,
+    "device_types": ["mobile:ios", "mobile:android", "pc:chrome", "other"],
+    "bucket": "<StaticFilesBucketName>",
+    "reviews_stream_name": "<ReviewsStreamName>",
+    "views_stream_name": "<ViewsStreamName>"
+}
