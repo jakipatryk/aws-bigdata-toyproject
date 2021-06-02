@@ -127,33 +127,10 @@ Resources:
               Service:
                 - 'lambda.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'S3Read'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 's3:Get*'
-                  - 's3:List*'
-                Resource: '*'
-        - PolicyName: 'AmazonDynamoDBFullAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action: 'dynamodb:*'
-                Resource: '*'
-        - PolicyName: 'AWSLambdaBasicExecutionRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'logs:CreateLogGroup'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
   S3ToDynamoDBLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -195,29 +172,8 @@ Resources:
                 - 'ec2.amazonaws.com'
             Action:
               - 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'AmazonEC2RoleforDataPipelineRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'cloudwatch:*'
-                  - 'datapipeline:*'
-                  - 'dynamodb:*'
-                  - 'ec2:Describe*'
-                  - 'elasticmapreduce:AddJobFlowSteps'
-                  - 'elasticmapreduce:Describe*'
-                  - 'elasticmapreduce:ListInstance*'
-                  - 'elasticmapreduce:ModifyInstanceGroups'
-                  - 'rds:Describe*'
-                  - 'redshift:DescribeClusters'
-                  - 'redshift:DescribeClusterSecurityGroups'
-                  - 's3:*'
-                  - 'sdb:*'
-                  - 'sns:*'
-                  - 'sqs:*'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforDataPipelineRole'
   SuspiciousIpsDetectionResourceInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -238,75 +194,13 @@ Resources:
                 - 'datapipeline.amazonaws.com'
                 - 'elasticmapreduce.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'AWSDataPipelineRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'cloudwatch:*'
-                  - 'datapipeline:DescribeObjects'
-                  - 'datapipeline:EvaluateExpression'
-                  - 'dynamodb:BatchGetItem'
-                  - 'dynamodb:DescribeTable'
-                  - 'dynamodb:GetItem'
-                  - 'dynamodb:Query'
-                  - 'dynamodb:Scan'
-                  - 'dynamodb:UpdateTable'
-                  - 'rds:DescribeDBInstances'
-                  - 'rds:DescribeDBSecurityGroups'
-                  - 'redshift:DescribeClusters'
-                  - 'redshift:DescribeClusterSecurityGroups'
-                  - 'ec2:AuthorizeSecurityGroupIngress'
-                  - 'ec2:CancelSpotInstanceRequests'
-                  - 'ec2:CreateSecurityGroup'
-                  - 'ec2:CreateTags'
-                  - 'ec2:DeleteTags'
-                  - 'ec2:Describe*'
-                  - 'ec2:ModifyImageAttribute'
-                  - 'ec2:ModifyInstanceAttribute'
-                  - 'ec2:RequestSpotInstances'
-                  - 'ec2:RunInstances'
-                  - 'ec2:StartInstances'
-                  - 'ec2:StopInstances'
-                  - 'ec2:TerminateInstances'
-                  - 'ec2:AuthorizeSecurityGroupEgress'
-                  - 'ec2:DeleteSecurityGroup'
-                  - 'ec2:RevokeSecurityGroupEgress'
-                  - 'ec2:DescribeNetworkInterfaces'
-                  - 'ec2:CreateNetworkInterface'
-                  - 'ec2:DeleteNetworkInterface'
-                  - 'ec2:DetachNetworkInterface'
-                  - 'elasticmapreduce:*'
-                  - 'iam:GetInstanceProfile'
-                  - 'iam:GetRole'
-                  - 'iam:GetRolePolicy'
-                  - 'iam:ListAttachedRolePolicies'
-                  - 'iam:ListRolePolicies'
-                  - 'iam:ListInstanceProfiles'
-                  - 'iam:PassRole'
-                  - 's3:CreateBucket'
-                  - 's3:DeleteObject'
-                  - 's3:Get*'
-                  - 's3:List*'
-                  - 's3:Put*'
-                  - 'sdb:BatchPutAttributes'
-                  - 'sdb:Select*'
-                  - 'sns:GetTopicAttributes'
-                  - 'sns:ListTopics'
-                  - 'sns:Publish'
-                  - 'sns:Subscribe'
-                  - 'sns:Unsubscribe'
-                Resource: '*'
-              - Effect: 'Allow'
-                Action: 'iam:CreateServiceLinkedRole'
-                Resource: '*'
-                Condition:
-                  StringLike:
-                    iam:AWSServiceName:
-                      - 'elasticmapreduce.amazonaws.com'
-                      - 'spot.amazonaws.com'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccess'
+        - 'arn:aws:iam::aws:policy/AWSDataPipeline_FullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonEC2FullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonEMRFullAccessPolicy_v2'
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
   SuspiciousIpsDetectionInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -402,78 +296,10 @@ Resources:
               Service:
                 - 'lambda.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'AmazonKinesisFullAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action: 'kinesis:*'
-                Resource: '*'
-        - PolicyName: 'AmazonDynamoDBReadOnlyAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'application-autoscaling:DescribeScalableTargets'
-                  - 'application-autoscaling:DescribeScalingActivities'
-                  - 'application-autoscaling:DescribeScalingPolicies'
-                  - 'cloudwatch:DescribeAlarmHistory'
-                  - 'cloudwatch:DescribeAlarms'
-                  - 'cloudwatch:DescribeAlarmsForMetric'
-                  - 'cloudwatch:GetMetricStatistics'
-                  - 'cloudwatch:ListMetrics'
-                  - 'cloudwatch:GetMetricData'
-                  - 'datapipeline:DescribeObjects'
-                  - 'datapipeline:DescribePipelines'
-                  - 'datapipeline:GetPipelineDefinition'
-                  - 'datapipeline:ListPipelines'
-                  - 'datapipeline:QueryObjects'
-                  - 'dynamodb:BatchGetItem'
-                  - 'dynamodb:Describe*'
-                  - 'dynamodb:List*'
-                  - 'dynamodb:GetItem'
-                  - 'dynamodb:Query'
-                  - 'dynamodb:Scan'
-                  - 'dynamodb:PartiQLSelect'
-                  - 'dax:Describe*'
-                  - 'dax:List*'
-                  - 'dax:GetItem'
-                  - 'dax:BatchGetItem'
-                  - 'dax:Query'
-                  - 'dax:Scan'
-                  - 'ec2:DescribeVpcs'
-                  - 'ec2:DescribeSubnets'
-                  - 'ec2:DescribeSecurityGroups'
-                  - 'iam:GetRole'
-                  - 'iam:ListRoles'
-                  - 'kms:DescribeKey'
-                  - 'kms:ListAliases'
-                  - 'sns:ListSubscriptionsByTopic'
-                  - 'sns:ListTopics'
-                  - 'lambda:ListFunctions'
-                  - 'lambda:ListEventSourceMappings'
-                  - 'lambda:GetFunctionConfiguration'
-                  - 'resource-groups:ListGroups'
-                  - 'resource-groups:ListGroupResources'
-                  - 'resource-groups:GetGroup'
-                  - 'resource-groups:GetGroupQuery'
-                  - 'tag:GetResources'
-                  - 'kinesis:ListStreams'
-                  - 'kinesis:DescribeStream'
-                  - 'kinesis:DescribeStreamSummary'
-                Resource: '*'
-              - Action: 'cloudwatch:GetInsightRuleReport'
-                Effect: 'Allow'
-                Resource: 'arn:aws:cloudwatch:*:*:insight-rule/DynamoDBContributorInsights*'
-        - PolicyName: 'AmazonKinesisFirehoseFullAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action: 'firehose:*'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFirehoseFullAccess'
   IpFilterLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -503,35 +329,11 @@ Resources:
               Service:
                 - 'lambda.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'AmazonKinesisFullAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action: 'kinesis:*'
-                Resource: '*'
-        - PolicyName: 'AmazonKinesisFirehoseFullAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action: 'firehose:*'
-                Resource: '*'
-        - PolicyName: 'AWSLambdaRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action: 'lambda:InvokeFunction'
-                Resource: '*'
-        - PolicyName: 'SagemakerInvokeEndpoint'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action: 'sagemaker:InvokeEndpoint'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFirehoseFullAccess'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaRole'
+        - 'arn:aws:iam::aws:policy/AmazonSageMakerFullAccess'
   SpamFilterLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -561,27 +363,10 @@ Resources:
               Service:
                 - 'firehose.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'AmazonKinesisFirehoseLambdaS3Access'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'lambda:InvokeFunction'
-                  - 'lambda:GetFunctionConfiguration'
-                  - 'logs:PutLogEvents'
-                  - 'kinesis:DescribeStream'
-                  - 'kinesis:GetShardIterator'
-                  - 'kinesis:GetRecords'
-                  - 'kinesis:ListShards'
-                  - 's3:AbortMultipartUpload'
-                  - 's3:GetBucketLocation'
-                  - 's3:GetObject'
-                  - 's3:ListBucket'
-                  - 's3:ListBucketMultipartUploads'
-                  - 's3:PutObject'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole'
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
   ViewsDeliveryStream:
     Type: AWS::KinesisFirehose::DeliveryStream
     Properties:
@@ -632,21 +417,9 @@ Resources:
               Service:
                 - 'kinesisanalytics.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'KinesisAnalyticsLambdaAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'lambda:InvokeFunction'
-                  - 'lambda:GetFunctionConfiguration'
-                  - 'logs:PutLogEvents'
-                  - 'kinesis:DescribeStream'
-                  - 'kinesis:GetShardIterator'
-                  - 'kinesis:GetRecords'
-                  - 'kinesis:ListShards'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole'
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
   KinesisAnalyticsKinesisStreamAccessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -659,19 +432,9 @@ Resources:
               Service:
                 - 'kinesisanalytics.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'KinesisAnalyticsKinesisAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'logs:PutLogEvents'
-                  - 'kinesis:DescribeStream'
-                  - 'kinesis:GetShardIterator'
-                  - 'kinesis:GetRecords'
-                  - 'kinesis:ListShards'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchLogsFullAccess'
   ViewsStreamAnalytics:
     Type: AWS::KinesisAnalytics::Application
     Properties:
@@ -754,20 +517,10 @@ Resources:
               Service:
                 - 'kinesisanalytics.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'KinesisAnalyticsS3AccessRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'logs:PutLogEvents'
-                  - 'kinesis:DescribeStream'
-                  - 'kinesis:GetShardIterator'
-                  - 'kinesis:GetRecords'
-                  - 'kinesis:ListShards'
-                  - 's3:*'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchLogsFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
   ViewsStreamAnalyticsItemsReference:
     Type: AWS::KinesisAnalytics::ApplicationReferenceDataSource
     Properties:
@@ -832,21 +585,10 @@ Resources:
               Service:
                 - 'kinesisanalytics.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'KinesisAnalyticsKinesisFirehoseAccess'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'logs:PutLogEvents'
-                  - 'kinesis:DescribeStream'
-                  - 'kinesis:GetShardIterator'
-                  - 'kinesis:GetRecords'
-                  - 'kinesis:ListShards'
-                  - 'firehose:PutRecord'
-                  - 'firehose:PutRecordBatch'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchLogsFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonKinesisFirehoseFullAccess'
   MostPopularItemsKinesisFirehoseOutput:
     Type: AWS::KinesisAnalytics::ApplicationOutput
     Properties:
@@ -888,16 +630,9 @@ Resources:
               Service:
                 - 'lambda.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'PublishToSNS'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'logs:PutLogEvents'
-                  - 'sns:Publish'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchLogsFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonSNSFullAccess'
   PublishToSNSLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -1167,29 +902,8 @@ Resources:
                 - 'ec2.amazonaws.com'
             Action:
               - 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'AmazonEC2RoleforDataPipelineRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'cloudwatch:*'
-                  - 'datapipeline:*'
-                  - 'dynamodb:*'
-                  - 'ec2:Describe*'
-                  - 'elasticmapreduce:AddJobFlowSteps'
-                  - 'elasticmapreduce:Describe*'
-                  - 'elasticmapreduce:ListInstance*'
-                  - 'elasticmapreduce:ModifyInstanceGroups'
-                  - 'rds:*'
-                  - 'redshift:DescribeClusters'
-                  - 'redshift:DescribeClusterSecurityGroups'
-                  - 's3:*'
-                  - 'sdb:*'
-                  - 'sns:*'
-                  - 'sqs:*'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforDataPipelineRole'
   S3ToRDSMySQLResourceInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -1210,67 +924,13 @@ Resources:
                 - 'datapipeline.amazonaws.com'
                 - 'ec2.amazonaws.com'
             Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'AWSDataPipelineRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'cloudwatch:*'
-                  - 'datapipeline:DescribeObjects'
-                  - 'datapipeline:EvaluateExpression'
-                  - 'dynamodb:BatchGetItem'
-                  - 'dynamodb:DescribeTable'
-                  - 'dynamodb:GetItem'
-                  - 'dynamodb:Query'
-                  - 'dynamodb:Scan'
-                  - 'dynamodb:UpdateTable'
-                  - 'rds:DescribeDBInstances'
-                  - 'rds:DescribeDBSecurityGroups'
-                  - 'redshift:DescribeClusters'
-                  - 'redshift:DescribeClusterSecurityGroups'
-                  - 'ec2:AuthorizeSecurityGroupIngress'
-                  - 'ec2:CancelSpotInstanceRequests'
-                  - 'ec2:CreateSecurityGroup'
-                  - 'ec2:CreateTags'
-                  - 'ec2:DeleteTags'
-                  - 'ec2:Describe*'
-                  - 'ec2:ModifyImageAttribute'
-                  - 'ec2:ModifyInstanceAttribute'
-                  - 'ec2:RequestSpotInstances'
-                  - 'ec2:RunInstances'
-                  - 'ec2:StartInstances'
-                  - 'ec2:StopInstances'
-                  - 'ec2:TerminateInstances'
-                  - 'ec2:AuthorizeSecurityGroupEgress'
-                  - 'ec2:DeleteSecurityGroup'
-                  - 'ec2:RevokeSecurityGroupEgress'
-                  - 'ec2:DescribeNetworkInterfaces'
-                  - 'ec2:CreateNetworkInterface'
-                  - 'ec2:DeleteNetworkInterface'
-                  - 'ec2:DetachNetworkInterface'
-                  - 'elasticmapreduce:*'
-                  - 'iam:GetInstanceProfile'
-                  - 'iam:GetRole'
-                  - 'iam:GetRolePolicy'
-                  - 'iam:ListAttachedRolePolicies'
-                  - 'iam:ListRolePolicies'
-                  - 'iam:ListInstanceProfiles'
-                  - 'iam:PassRole'
-                  - 's3:CreateBucket'
-                  - 's3:DeleteObject'
-                  - 's3:Get*'
-                  - 's3:List*'
-                  - 's3:Put*'
-                  - 'sdb:BatchPutAttributes'
-                  - 'sdb:Select*'
-                  - 'sns:GetTopicAttributes'
-                  - 'sns:ListTopics'
-                  - 'sns:Publish'
-                  - 'sns:Subscribe'
-                  - 'sns:Unsubscribe'
-                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccess'
+        - 'arn:aws:iam::aws:policy/AWSDataPipeline_FullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonEC2FullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonEMRFullAccessPolicy_v2'
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
   S3ToRDSMySQLInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
